@@ -1,14 +1,22 @@
 import os
 import zipfile
 import xml.etree.ElementTree as ET
+import shutil
 import re
 from datetime import datetime
 
-def extract_kml_from_kmz(kmz_file, output_dir):
-    with zipfile.ZipFile(kmz_file, 'r') as zip_ref:
-        zip_ref.extractall(output_dir)
-    kml_files = [filename for filename in os.listdir(output_dir) if filename.endswith('doc.kml')]
-    return os.path.join(output_dir, kml_files[0])
+def extract_kml_from_kmz(kmz_path, output_dir):
+    with zipfile.ZipFile(kmz_path, 'r') as kmz:
+        for file in kmz.namelist():
+            if file.endswith('.kml'):
+                extracted_path = os.path.join(
+                    output_dir,
+                    os.path.basename(kmz_path).replace('.kmz', f'_{os.path.basename(file)}')
+                )
+                with kmz.open(file) as source, open(extracted_path, 'wb') as target:
+                    shutil.copyfileobj(source, target)
+                return extracted_path
+    return None
 
 def delete_files_in_folder(folder_path, extension=None):
     for filename in os.listdir(folder_path):
@@ -46,26 +54,37 @@ def remove_cdata_from_kml(kml_file):
     return kml_file
 
 
-def extract_coordinates_from_kml(kml_file, count, working_street_id):
+def extract_coordinates_from_kml(kml_file, working_street_id, polygon_number):
     tree = ET.parse(kml_file)
     root = tree.getroot()
 
     for placemark in root.findall('.//{http://www.opengis.net/kml/2.2}Placemark'):
         for coords_element in placemark.findall('.//{http://www.opengis.net/kml/2.2}coordinates'):
-            count += 1
             coords = coords_element.text.strip().split()
-            output = 'insert into working_street_polygon (id,name,geom,working_street_id,active,company_id,created,created_user_id) values (uuid_generate_v1(), \'S' + str(count) + '\' , \'POLYGON(('
+            output = (
+                "insert into working_street_polygon "
+                "(id, name, geom, working_street_id, active, company_id, created, created_user_id) "
+                f"values (uuid_generate_v1(), '{polygon_number}', 'POLYGON(("
+            )
+
             for coord in coords:
                 parts = coord.split(',')
-            if len(parts) >= 2:
-                lon, lat = parts[0], parts[1]
-                alt = parts[2] if len(parts) > 2 else '0'
-                output += f"{lat} {lon},"
-            output = output[:-1] + '))\',\'' + working_street_id + '\', TRUE, \'ZG_PARKIS\', NOW(), \'10fe9397-13da-4ddf-8d50-ef0a83313bb2\');'
-            print(output)
-    return count
+                if len(parts) >= 2:
+                    lon, lat = parts[0], parts[1]
+                    output += f"{lat} {lon},"
 
-def merge_kml_files(input_folder, output_file, count):
+            output = output.rstrip(',') + (
+                f"))','{working_street_id}', TRUE, 'ZG_PARKIS', NOW(), '10fe9397-13da-4ddf-8d50-ef0a83313bb2');"
+            )
+
+            print(output)
+            polygon_number += 1
+
+    return polygon_number
+
+
+
+def merge_kml_files(input_folder, output_file, polygon_number):
     merged_root = ET.Element('kml')
     merged_document = ET.SubElement(merged_root, 'Document')
 
@@ -77,14 +96,14 @@ def merge_kml_files(input_folder, output_file, count):
                 kml_root = kml_tree.getroot()
 
                 for placemark in kml_root.findall('.//{http://www.opengis.net/kml/2.2}Placemark'):
-                    count += 1
-                    placemark.set('id', 'S' + str(count))
+                    polygon_number += 1
+                    placemark.set('id', str(polygon_number))
                     if 'id' in placemark.attrib:
                         del placemark.attrib['id']
 
                     name_element = placemark.find('{http://www.opengis.net/kml/2.2}name')
                     if name_element is not None:
-                        name_element.text = f'S{count} ' + name_element.text
+                        name_element.text = f'{polygon_number} ' + name_element.text
 
                     extended_data = placemark.find('{http://www.opengis.net/kml/2.2}ExtendedData')
                     if extended_data is not None:

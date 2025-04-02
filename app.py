@@ -40,9 +40,14 @@ col1, col2 = st.columns(2)
 with col1:
     selected_city = st.selectbox("Choose a city", [""] + CITIES)
 with col2:
-    custom_city = st.text_input("Or enter a custom city")
+    polygon_number = st.text_input("Enter polygon number", value="1")
+try:
+    polygon_number = int(polygon_number)
+except ValueError:
+    st.error("⚠️ Polygon number must be a valid integer.")
+    st.stop()
 
-city = custom_city.strip() if custom_city.strip() else selected_city
+city = selected_city
 
 uploaded_files = st.file_uploader(
     "Upload KMZ or KML files",
@@ -50,9 +55,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# -------------------
 # Processing Logic
-# -------------------
 
 if st.button("🚀 Process Files"):
 
@@ -63,8 +66,6 @@ if st.button("🚀 Process Files"):
     else:
         delete_files_in_folder(KMZ_DIR)
         delete_files_in_folder(KML_DIR)
-
-        count = 30000
 
         all_coords = []
         polygons = []
@@ -95,7 +96,7 @@ if st.button("🚀 Process Files"):
             # Capture and show SQL
             output_buffer = io.StringIO()
             with contextlib.redirect_stdout(output_buffer):
-                count = extract_coordinates_from_kml(cleaned_kml, count, working_street_id)
+                polygon_number = extract_coordinates_from_kml(cleaned_kml, working_street_id, polygon_number)
 
             st.code(output_buffer.getvalue(), language="sql")
 
@@ -119,7 +120,7 @@ if st.button("🚀 Process Files"):
                                     "lon": lon,
                                     "file": filename
                                 })
-                                polygon_coords.append([lon, lat])  # 👈 build polygon
+                                polygon_coords.append([lon, lat]) 
 
                         if polygon_coords:
                             polygons.append({
@@ -131,7 +132,7 @@ if st.button("🚀 Process Files"):
 
         # Merge files and create ZIP
         merged_kml_path = os.path.join(KML_DIR, "merged_output.kml")
-        merge_kml_files(KML_DIR, merged_kml_path, count)
+        merge_kml_files(KML_DIR, merged_kml_path, polygon_number)
 
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "w") as zipf:
